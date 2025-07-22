@@ -1,0 +1,506 @@
+---
+title: "Comparative Analysis of Metrics for Model Drift"
+author: "Vignesh Narayanaswamy"
+date: "`r Sys.Date()`"
+output: 
+  word_document: default
+  html_document: default
+  pdf_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Introduction
+
+Objective This analysis compares Hellinger Distance and PSI for
+monitoring input drift and output drift, contrasting the metrics for
+effectiveness across distinct scenarios of distributional change to
+discern the strengths and weaknesses of each approach. The objective of
+this document is to help model owners make informed decisions regarding
+metric choice in alignment with the specific needs of their monitoring tasks.
+
+Scope To be able to effectively monitor model or heuristic performance,
+a fundamental challenge is the quantification of performance
+degradation. Identifying the parameters to track the model performance
+and defining the thresholds that if breached should raise an alert are
+fundamental components of continuous monitoring. Drift, defined as the
+change in a distribution over time, can indicate the degradation of a
+machine learning model or heuristic.
+
+There are two main types of drift: Data Drift - Change in distribution
+of X (features) or Y (predictions) E.g. Distribution of incomes of
+customers changes over time Concept Drift - Drift in P(X\|Y) called
+concept drift. E.g. Definition of what is considered a fraudulent
+transaction changes
+
+This document only discusses the application of Hellinger Distance and
+PSI to data drift and does not explore their usage for concept drift.
+
+# II. Overview of Drift Metrics
+
+## A. Hellinger Distance
+
+## Definition
+
+The Hellinger distance $H(P, Q)$ between two discrete probability
+distributions $P$ and $Q$ is defined as:
+
+$$ H(P, Q) = \frac{1}{\sqrt{2}} \sqrt{\sum_{i} \left( \sqrt{p_i} - \sqrt{q_i} \right)^2} $$
+
+where $p_i$ is the probability of event $i$ in distribution $P$ and
+$q_i$ is the probability of event $i$ in distribution $Q$.
+
+## Properties
+
+-   The Hellinger distance is always in the range $[0, 1]$. A value of 0
+    indicates that the distributions are identical, while a value of 1
+    indicates that the distributions are maximally different.
+-   It is symmetric, meaning $H(P, Q) = H(Q, P)$.
+
+## B. Population Stability Index
+
+## Definition
+
+The PSI is calculated as:
+
+$$ \text{PSI} = \sum \left( (p_i - q_i) \times \ln \left( \frac{p_i}{q_i} \right) \right) $$
+
+where: $p_i$ is the proportion of events in a specific bin for the
+development sample and $q_i$ is the proportion of events in the same bin
+for the validation sample.
+
+## Properties
+
+-   A PSI value of 0 indicates no shift in the distribution between the
+    development and validation samples. There is no upper limit to PSI.
+    As the distributions diverge, the value of PSI continues to rise.
+
+## Assumptions and Limitations of both approaches
+
+-   **Binning**: If used for numeric variables, binning must be
+    performed, which can sometimes be subjective. The choice of bins can
+    impact the PSI value.
+
+-   **Size of Samples**: Small sample sizes can lead to instability in
+    the calculations, especially if certain bins have very few
+    observations.
+
+## C. Comparison of Hellinger Distance and PSI for distributional shifts
+
+The Population Stability Index (PSI) and Hellinger Distance (HD) measure
+distributional shifts differently through their respective formulas.
+
+1.  **Population Stability Index (PSI):**
+    $$ \text{PSI} = \sum_{i=1}^n \left( (p_i - q_i) \cdot \ln \left( \frac{p_i}{q_i} \right) \right) $$
+
+    -   **Difference in Proportions (**$p_i - q_i$): This term captures
+        the absolute difference in proportions between the actual and
+        expected distributions for each bin. If the distributions are
+        identical, the difference in proportions is zero, resulting in a
+        PSI of zero.
+
+    -   **Logarithm of the Ratio
+        (**$\ln \left( \frac{p_i}{q_i} \right)$): The log-ratio
+        amplifies the relative change between the two distributions. It
+        is more sensitive to relative changes, especially when the
+        proportions are small, making the PSI very responsive to
+        distributional shifts.
+
+2.  **Hellinger Distance (HD):**
+    $$ H(P, Q) = \frac{1}{\sqrt{2}} \sqrt{\sum_{i=1}^n \left( \sqrt{p_i} - \sqrt{q_i} \right)^2 } $$
+
+    -   **Square Root of Proportions (**$\sqrt{p_i}$ and $\sqrt{q_i}$):
+        The square root transformation can help dampen the effect of
+        extreme values or outliers. It is less sensitive to large
+        absolute differences in proportions, especially in the tails of
+        the distributions.
+
+    -   **Squared Euclidean Distance:** This part measures the
+        "distance" between the two distributions across all bins,
+        emphasizing the geometric difference between the distributions.
+        It is sensitive to differences across the entire range of the
+        distributions, making the Hellinger Distance a balanced measure
+        of distributional shift.
+
+**Comparison:**
+
+-   **Sensitivity:** PSI is often more sensitive to distributional
+    shifts due to the log-ratio, especially when the proportions are
+    small or when there's a significant change in a bin with a small
+    proportion of data. On the other hand, the Hellinger Distance may be
+    less sensitive to such changes due to the square root
+    transformation.
+
+-   **Outliers and Noise:** Hellinger Distance's square root
+    transformation can dampen the effect of extreme values or noise,
+    making it potentially more robust to such values compared to PSI.
+
+-   **Interpretability:** PSI may be less intuitive due to its unbounded
+    nature and reliance on the logarithm of ratios, whereas Hellinger
+    Distance's bounded range (0 to 1) and geometric interpretation can
+    sometimes be more intuitive.
+
+------------------------------------------------------------------------
+
+# III. Simulation for Comparing Distribution Metrics
+
+This section compares Hellinger Distance and PSI by simulating different
+scenarios and evaluating their differences.
+
+```{r include=FALSE}
+
+library(reticulate)
+use_python("/Users/vigneshn/PycharmProjects/pythonProject/venv/bin/python")
+
+```
+
+```{python include=FALSE}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial import distance
+from scipy.stats import skewnorm
+import seaborn as sns
+```
+
+```{python include=FALSE}
+
+### Defining the Functions
+
+def get_pmf_bin_num(data_series, bins):
+    hist, bin_edges = np.histogram(data_series, bins = bins)
+    return hist/np.sum(hist), bin_edges
+
+def get_pmf_bin_cuts(data_series, bin_cut_points):
+    hist, bin_edges = np.histogram(data_series, bins = bin_cut_points)
+    return hist/np.sum(hist) 
+  
+def get_hellinger(old, new, bins):
+    p = get_pmf_bin_num(old, bins)[0]
+    q = get_pmf_bin_cuts(new, get_pmf_bin_num(old, bins)[1])
+    hellinger = (1/np.sqrt(2))*np.sqrt(sum( (np.sqrt(p) - np.sqrt(q))**2 ))
+    return hellinger
+
+def get_psi(old, new, bins):  # modified function signature to accept bins argument
+    p = get_pmf_bin_num(old, bins)[0]
+    q = get_pmf_bin_cuts(new, get_pmf_bin_num(old, bins)[1])
+    
+    epsilon = 1e-10
+    # Ensure p and q are not zero or very small, add epsilon
+    p = np.maximum(p, epsilon)
+    q = np.maximum(q, epsilon)
+
+    return sum((p-q)*np.log(p/q))
+
+def get_jensen_shannon(old, new, bins):
+    p = get_pmf_bin_num(old, bins)[0]
+    q = get_pmf_bin_cuts(new, get_pmf_bin_num(old, bins)[1])
+    
+    return distance.jensenshannon(p, q)**2
+```
+
+### Distributional Shifts Explored
+
+The following shifts are explored in a fictitious scenario, where 5
+variables are sampled from standard normal distributions, each with 1000
+observations (the training data). Subsequently, an additional 3000
+observations are generated (the live data). 1000 observations through
+the live data, a distributional shift occurs in 4 of the 5 variables. A
+summary of the 5 variables is below:
+
+-   **Mean Shift**:
+    -   Mean shifts from 0 to 3.
+-   **Standard Deviation Shift**:
+    -   Standard deviation changes from 1 to 2.
+-   **Distributional Shift**:
+    -   The data transitions to samples from a Poisson distribution with
+        a mean of 3.
+-   **Transitioning Series**:
+    -   The series transitions from an initial mean of 0 to a final mean
+        of 3 over 1000 time steps.
+-   **Stationary Series**:
+    -   Remains consistent across the training and live data and does
+        not exhibit any drift.
+
+Graphical representations of the shifts are below:
+
+```{python include=FALSE}
+
+np.random.seed(42)  # Set seed for reproducability
+
+# Create an empty DataFrame for the first set of variables
+training_data = pd.DataFrame()
+
+# Create 5 variables that sample from normal dist with same parameters
+training_data['Stationary Series'] = np.random.normal(0, 1, 1000)
+training_data['Mean Shift'] = np.random.normal(0, 1, 1000)
+training_data['Standard Deviation Shift'] = np.random.normal(0, 1, 1000)
+#training_data['Mean and Standard Deviation Shift'] = np.random.normal(1, 1000)
+training_data['Distributional Shift'] =np.random.normal(0,1, 1000)
+training_data['Transitioning Shift'] = np.random.normal(0,1, 1000)
+training_data['Skewness Shift'] = np.random.normal(0, 1, 1000)
+training_data['Noisy Signal'] = np.random.normal(0, 10, 1000)  # mean = 0, std dev = 10
+
+
+
+
+# Create an empty DataFrame for the second set of variables
+live_data1 = pd.DataFrame()
+
+# Create 5 variables that sample from normal dist with same parameters
+live_data1['Stationary Series'] = np.random.normal(0, 1, 1000)
+live_data1['Mean Shift'] = np.random.normal(0, 1, 1000)
+live_data1['Standard Deviation Shift'] = np.random.normal(0, 1, 1000)
+#live_data1['Normal_Distribution_mean_std_shift'] = np.random.normal(0,1, 1000)
+live_data1['Distributional Shift'] =np.random.normal(0,1, 1000)
+live_data1['Transitioning Shift'] = np.random.normal(0,1, 1000)
+live_data1['Skewness Shift']  = np.random.normal(0, 1, 1000)
+live_data1['Noisy Signal'] = np.random.normal(0, 10, 1000)  # mean = 0, std dev = 10
+
+
+
+# Create an empty DataFrame for the second set of variables
+live_data2 = pd.DataFrame()
+
+# Create 5 variables by sampling from different distributions with set 2 parameters
+live_data2['Stationary Series'] = np.random.normal(0, 1, 2000)
+live_data2['Mean Shift'] = np.random.normal(3, 1, 2000)
+live_data2['Standard Deviation Shift'] = np.random.normal(0, 2, 2000)
+#live_data2['Normal_Distribution_mean_std_shift'] = np.random.normal(3, 2, 2000)
+live_data2['Distributional Shift'] = np.random.poisson(3, 2000)
+live_data2['Skewness Shift']  = skewnorm.rvs(a=5, loc=0, scale=1, size=2000)
+live_data2['Noisy Signal'] = np.random.normal(0, 10, 2000)  # mean = 0, std dev = 10
+
+# Define the length of the Series and the number of time steps for the transition
+series_length = 2000
+num_time_steps = 1000
+
+# Define the initial and final mean values
+initial_mean = 0
+final_mean = 3
+std_dev = 1
+
+# Create an array to store the values
+values = []
+
+# Generate values that transition smoothly over time
+for t in range(num_time_steps + 1):
+    alpha = t / num_time_steps  # Interpolation factor
+    
+    # Interpolate the mean parameter
+    mean = (1 - alpha) * initial_mean + alpha * final_mean
+    
+    # Calculate the number of samples for this time step
+    num_samples = round(series_length / (num_time_steps + 1))
+    
+    # Generate samples with the interpolated mean
+    samples = np.random.normal(mean, std_dev, num_samples)
+    
+    # Append the samples to the values array
+    values.extend(samples)
+
+live_data2['Transitioning Shift'] =  pd.Series(values[:series_length])
+
+live_data = pd.concat([live_data1, live_data2], ignore_index=True)
+
+```
+
+### Visualization of Shifts
+
+```{python, echo=FALSE}
+# Define the width and height multipliers
+width = 15  # Adjust the width of the entire figure
+height_per_subplot = 5  # Adjust the height for each individual subplot
+
+fig, axs = plt.subplots(3, 2, figsize=(width, height_per_subplot * 3))  # Adjust the 3 here to match the number of rows
+
+# Flatten the axis array for easy indexing
+axs = axs.flatten()
+
+# Plot each smoothed variable in a separate panel of the grid
+for i, col in enumerate(live_data.columns[:-1]):
+    ax = axs[i]
+    ax.plot(live_data.index, live_data[col], label=col)
+    ax.set_xlabel('Observations')
+    ax.set_ylabel('Values')
+    ax.set_title(f'{col}', fontsize=30)
+    ax.legend()
+    ax.grid(True)
+#plt.subplots_adjust(hspace=0.5, wspace=0.5)
+plt.tight_layout()
+plt.show()
+```
+
+Next, metrics are computed for each variable, using the training data
+for the reference distribution and using a sliding window over the live
+data for the comparision distribution. A window size is defined, meaning
+each segment for analysis includes 150 observations, and a step size of
+1 is employed, meaning the window moves forward by one observation for
+each subsequent analysis.
+
+```{python include=FALSE}
+hellinger_results = pd.DataFrame()
+PSI_results = pd.DataFrame()
+
+window_size = 150  # Size of the window
+step_size = 1    # Sliding step size
+
+for col in training_data.columns:
+    hellinger_results[col] = live_data[col].rolling(window=window_size, min_periods=window_size).apply(lambda x: get_hellinger(x, training_data[col], bins = 10)).dropna()
+    PSI_results[col] = live_data[col].rolling(window=window_size, min_periods=window_size).apply(lambda x: get_psi(x, training_data[col], bins = 10)).dropna()
+```
+
+### Visual Comparison of Drift Metrics
+
+Metrics for the previously described distributions are plotted below.
+PSI and Hellinger distance respond to all distributional shifts
+examined. However, PSI tends to be more reactive, detecting changes
+faster. While this is advantageous in scenarios where this is true drift
+presence, PSI may be overly reactive to noise, or where there is a small
+number of observations in some bins. Note that PSI has false positives
+for drift for the Stationary Series, where there is no drifts.
+
+```{python echo=FALSE}
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Assume hellinger_results and PSI_results are already defined
+# ... other parts of your code ...
+
+# Get the column names for Hellinger and PSI results
+hellinger_columns = hellinger_results.columns
+PSI_columns = PSI_results.columns
+
+# Determine the number of plots to create (all but the last column)
+num_plots = len(hellinger_columns) - 1
+
+# Create a 3x2 grid of subplots
+fig, axs = plt.subplots(3, 2, figsize=(12, 18))  # Adjust the figure size if necessary
+
+# Flatten the axis array for easy indexing
+axs = axs.flatten()
+
+# Iterate through each subplot and plot the data (all but the last column)
+for i in range(num_plots):
+    ax = axs[i]  # Get the current axis
+
+    # Plot Hellinger distance for the i-th column of hellinger_results
+    ax.plot(hellinger_results.index, hellinger_results[hellinger_columns[i]], label=f'Hellinger - {hellinger_columns[i]}', linestyle='-', color='blue')
+
+    # Plot PSI for the i-th column of PSI_results
+    ax.plot(PSI_results.index, PSI_results[PSI_columns[i]], label=f'PSI - {PSI_columns[i]}', linestyle='-', color='green')
+
+    # Set labels, title, legend, and grid
+    ax.set_xlabel('Observations')
+    ax.set_ylabel('Values')
+    ax.set_title(f'Line Plots of Hellinger and PSI for {hellinger_columns[i]}')
+    ax.legend()
+    ax.grid(True)
+
+    # Set the x-axis limits
+    x_start = 900  # Replace with your desired starting point
+    x_end = 1400    # Replace with your desired ending point
+    ax.set_xlim(x_start, x_end)
+
+    # Set the y-axis limits
+    y_start = 0  # Replace with your desired starting point
+    y_end = 0.3    # Replace with your desired ending point
+    ax.set_ylim(y_start, y_end)
+
+    # Add a horizontal red dashed line at y = 0.2
+    ax.axhline(y=0.2, color='red', linestyle='--')
+
+# Adjust the layout to prevent overlapping
+plt.tight_layout()
+plt.show()
+```
+
+### Effect of Bin Number
+
+To further demonstrate the effect of noise and bin number on PSI and
+Hellinger Distance, consider the following example which uses different
+bin numbers and a variable with no distributional shift, but is noisier
+than the previous distributions observed (mean zero with standard
+deviation of 10). Note that while both the average value of PSI and
+Hellinger respond monotonically to bin number (more bins leads to larger
+metric values), the standard deviation of PSI increases as the number of
+bins goes up while the standard deviation of Hellinger Distance stays
+constant.
+
+```{python echo=FALSE}
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Assume hellinger_results, PSI_results, get_psi, and get_hellinger are already defined
+# ... other parts of your code ...
+
+# Initialize result DataFrames
+PSI_bin_size_analysis = pd.DataFrame()
+Hellinger_bin_size_analysis = pd.DataFrame()
+
+# Loop through bin sizes and calculate PSI and Hellinger
+for bins in [10,20,50]:  # Updated bin values
+    window_size = 200  # Fixed window size, adjust as per your requirement
+
+    # PSI Calculation
+    PSI_bin_size_analysis[f"Noisy Signal {bins} bins"] = \
+        live_data["Noisy Signal"].rolling(window=window_size, min_periods=window_size).apply(
+            lambda x: get_psi(x, training_data["Noisy Signal"], bins=bins)).dropna()
+
+    # Hellinger Distance Calculation
+    Hellinger_bin_size_analysis[f"Noisy Signal {bins} bins"] = \
+        live_data["Noisy Signal"].rolling(window=window_size, min_periods=window_size).apply(
+            lambda x: get_hellinger(x, training_data["Noisy Signal"], bins=bins)).dropna()
+
+# Create a figure with 1 row and 2 columns for side-by-side plots
+fig, axs = plt.subplots(1, 2, figsize=(20, 6))
+
+# Customize plot properties
+title_fontsize = 20  # Change as needed
+axis_label_fontsize = 14  # Change as needed
+legend_fontsize = 12  # Change as needed
+
+# Plot PSI
+for column in PSI_bin_size_analysis.columns:
+    # Calculate standard deviation and mean for observations after 1000
+    std_psi = PSI_bin_size_analysis.loc[1000:, column].std()
+    mean_psi = PSI_bin_size_analysis.loc[1000:, column].mean()  # Calculate mean
+    label_psi = f"{column} (std: {std_psi:.2f}, mean: {mean_psi:.2f})"  # Include mean in the label
+    axs[0].plot(PSI_bin_size_analysis.index, PSI_bin_size_analysis[column], label=label_psi, alpha=0.5)
+axs[0].set_title('PSI Bin Size Analysis', fontsize=title_fontsize)
+axs[0].set_xlabel('Observations', fontsize=axis_label_fontsize)  # Updated label
+axs[0].set_ylabel('Value', fontsize=axis_label_fontsize)
+axs[0].legend(loc='upper right', fontsize=legend_fontsize)
+
+# Plot Hellinger
+for column in Hellinger_bin_size_analysis.columns:
+    # Calculate standard deviation and mean for observations after 1000
+    std_hellinger = Hellinger_bin_size_analysis.loc[1000:, column].std()
+    mean_hellinger = Hellinger_bin_size_analysis.loc[1000:, column].mean()  # Calculate mean
+    label_hellinger = f"{column} (std: {std_hellinger:.2f}, mean: {mean_hellinger:.2f})"  # Include mean in the label
+    axs[1].plot(Hellinger_bin_size_analysis.index, Hellinger_bin_size_analysis[column], label=label_hellinger, alpha=0.5)
+axs[1].set_title('Hellinger Bin Size Analysis', fontsize=title_fontsize)
+axs[1].set_xlabel('Observations', fontsize=axis_label_fontsize)  # Updated label
+axs[1].set_ylabel('Value', fontsize=axis_label_fontsize)
+axs[1].legend(loc='upper right', fontsize=legend_fontsize)
+
+# Adjust spacing and display
+plt.tight_layout()
+plt.show()
+
+```
+
+### Choosing between PSI and Hellinger Distance to Monitor Drift
+
+| Property/Scenario       | Population Stability Index (PSI)                                                                                       | Hellinger Distance (HD)                                                                                                                                    |
+|-----------------|------------------------|-------------------------------|
+| **General Sensitivity** | High sensitivity to distributional shifts due to the log-ratio, especially when the proportions are small.             | Less sensitive to large absolute differences in proportions, especially in the tails of the distributions due to square root transformation.               |
+| **Outliers and Noise**  | May be more affected by outliers and noise.                                                                            | The square root transformation can help dampen the effect of extreme values or outliers, making HD potentially more robust to such values compared to PSI. |
+| **Interpretability**    | May be less intuitive due to its unbounded nature and reliance on the logarithm of ratios.                             | More intuitive due to bounded range (0 to 1) and geometric interpretation.                                                                                 |
+| **Binning Requirement** | Binning must be performed, which can be subjective. The choice of bins can impact the PSI value.                       | Binning must be performed, which can be subjective. The choice of bins can impact the HD value.                                                            |
+| **Size of Samples**     | Small sample sizes can lead to instability in the calculations, especially if certain bins have very few observations. | Small sample sizes can lead to instability in the calculations, especially if certain bins have very few observations.                                     |
