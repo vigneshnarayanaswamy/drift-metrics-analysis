@@ -4,29 +4,49 @@
 
 A comparative analysis of Hellinger Distance and Population Stability Index (PSI) for detecting model drift in machine learning applications.
 
-## Files
+## Repository Structure
 
-- **`Drift Metrics.Rmd`** - Main R Markdown analysis
-- **`Drift Metrics.R`** - R script version  
-- **`Hellinger_vs_PSI.ipynb`** - Python/Jupyter implementation
-- **`Drift-Metrics.html`** - Generated HTML report
-- **`Drift-Metrics.pdf`** - Generated PDF report
+```
+├── src/                    # Source code
+├── reports/                # Generated reports
+├── figures/                # Visualizations
+└── archive/                # Legacy files
+```
+
+### 📂 Source Code
+- **[Drift Metrics.Rmd](src/Drift%20Metrics.Rmd)** - Main R Markdown analysis
+- **[Drift Metrics.R](src/Drift%20Metrics.R)** - R script version
+- **[Hellinger_vs_PSI.ipynb](src/Hellinger_vs_PSI.ipynb)** - Python/Jupyter implementation
+
+### 📊 Generated Reports
+- **[Drift-Metrics.html](reports/Drift-Metrics.html)** - Interactive HTML report
+- **[Drift-Metrics.pdf](reports/Drift-Metrics.pdf)** - PDF report  
+- **[Drift-Metrics.docx](reports/Drift-Metrics.docx)** - Word document
+
+### 📈 Visualizations
+- **[Plot 0](figures/plot_0.png)** - Time series visualization
+- **[Plot 1](figures/plot_1.png)** - Distribution comparison
+- **[Plot 2](figures/plot_2.png)** - Metric comparison
+- **[Plot 3](figures/plot_3.png)** - Statistical analysis
+- **[Plot 4](figures/plot_4.png)** - Drift detection
+- **[Plot 5](figures/plot_5.png)** - Bin size analysis
+- **[Plot 6](figures/plot_6.png)** - Performance metrics
 
 ## Usage
 
 **R Markdown:**
 ```r
-rmarkdown::render("Drift Metrics.Rmd")
+rmarkdown::render("src/Drift Metrics.Rmd")
 ```
 
 **R Script:**
 ```r
-source("Drift Metrics.R")
+source("src/Drift Metrics.R")
 ```
 
 **Python:**
 ```bash
-jupyter notebook Hellinger_vs_PSI.ipynb
+jupyter notebook src/Hellinger_vs_PSI.ipynb
 ```
 
 ## Requirements
